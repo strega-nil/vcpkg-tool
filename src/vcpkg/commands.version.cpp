@@ -24,17 +24,15 @@ namespace vcpkg::Commands::Version
             ;
     }
 
-    const std::string& version()
+    const char* version()
     {
-        static const std::string S_VERSION =
+        return
 #include "../VERSION.txt"
-
-            +std::string(VCPKG_VERSION_AS_STRING)
+            "-" VCPKG_VERSION_AS_STRING
 #ifndef NDEBUG
-            + std::string("-debug")
+            "-debug"
 #endif
             ;
-        return S_VERSION;
     }
 
     static int scan3(const char* input, const char* pattern, int* a, int* b, int* c)
@@ -55,7 +53,7 @@ namespace vcpkg::Commands::Version
             const auto num1 = scan3(version_contents->c_str(), "\"%d.%d.%d\"", &maj1, &min1, &rev1);
 
             int maj2, min2, rev2;
-            const auto num2 = scan3(Version::version().c_str(), "%d.%d.%d-", &maj2, &min2, &rev2);
+            const auto num2 = scan3(Version::version(), "%d.%d.%d-", &maj2, &min2, &rev2);
 
             if (num1 == 3 && num2 == 3)
             {
