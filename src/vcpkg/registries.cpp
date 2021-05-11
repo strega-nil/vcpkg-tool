@@ -47,7 +47,7 @@ namespace
         mutable std::vector<std::string> git_trees;
     };
 
-    struct GitRegistry final : RegistryImplementation
+    struct GitRegistry : RegistryImplementation
     {
         GitRegistry(std::string&& repo, std::string&& baseline)
             : m_repo(std::move(repo)), m_baseline_identifier(std::move(baseline))
@@ -56,11 +56,14 @@ namespace
 
         StringLiteral kind() const override { return "git"; }
 
-        std::unique_ptr<RegistryEntry> get_port_entry(const VcpkgPaths&, StringView) const override;
+        std::unique_ptr<RegistryEntry> get_port_entry(const VcpkgPaths&, StringView) const final;
 
-        void get_all_port_names(std::vector<std::string>&, const VcpkgPaths&) const override;
+        void get_all_port_names(std::vector<std::string>&, const VcpkgPaths&) const final;
 
-        Optional<VersionT> get_baseline_version(const VcpkgPaths&, StringView) const override;
+        Optional<VersionT> get_baseline_version(const VcpkgPaths&, StringView) const final;
+
+        std::string m_repo;
+        std::string m_baseline_identifier;
 
     private:
         friend struct GitRegistryEntry;
@@ -133,8 +136,6 @@ namespace
             return {*m_stale_versions_tree.get(), true};
         }
 
-        std::string m_repo;
-        std::string m_baseline_identifier;
         DelayedInit<LockFile::Entry> m_lock_entry;
         mutable Optional<fs::path> m_stale_versions_tree;
         DelayedInit<fs::path> m_versions_tree;
@@ -144,6 +145,32 @@ namespace
         mutable const VcpkgPaths* m_paths = nullptr;
     };
 
+    struct FilesystemRegistryEntry final : RegistryEntry
+    {
+        explicit FilesystemRegistryEntry(std::string&& port_name) : port_name(port_name) { }
+
+        View<VersionT> get_port_versions() const override { return port_versions; }
+
+        ExpectedS<fs::path> get_path_to_version(const VcpkgPaths& paths, const VersionT& version) const override;
+
+        std::string port_name;
+
+        // these two map port versions to paths
+        // these shall have the same size, and paths[i] shall be the path for port_versions[i]
+        std::vector<VersionT> port_versions;
+        std::vector<fs::path> version_paths;
+    };
+
+#if defined(VCPKG_INSTALLABLE) && VCPKG_INSTALLABLE
+    struct BuiltinRegistry final : GitRegistry
+    {
+        BuiltinRegistry(std::string&& baseline) : GitRegistry("https://github.com/microsoft/vcpkg", std::move(baseline))
+        {
+        }
+
+        StringLiteral kind() const override { return "builtin"; }
+    };
+#else
     struct BuiltinPortTreeRegistryEntry final : RegistryEntry
     {
         View<VersionT> get_port_versions() const override { return {&version, 1}; }
@@ -179,23 +206,6 @@ namespace
         std::vector<VersionT> port_versions;
         std::vector<std::string> git_trees;
     };
-
-    struct FilesystemRegistryEntry final : RegistryEntry
-    {
-        explicit FilesystemRegistryEntry(std::string&& port_name) : port_name(port_name) { }
-
-        View<VersionT> get_port_versions() const override { return port_versions; }
-
-        ExpectedS<fs::path> get_path_to_version(const VcpkgPaths& paths, const VersionT& version) const override;
-
-        std::string port_name;
-
-        // these two map port versions to paths
-        // these shall have the same size, and paths[i] shall be the path for port_versions[i]
-        std::vector<VersionT> port_versions;
-        std::vector<fs::path> version_paths;
-    };
-
     struct BuiltinRegistry final : RegistryImplementation
     {
         BuiltinRegistry(std::string&& baseline) : m_baseline_identifier(std::move(baseline))
@@ -216,6 +226,7 @@ namespace
         std::string m_baseline_identifier;
         DelayedInit<Baseline> m_baseline;
     };
+#endif
 
     struct FilesystemRegistry final : RegistryImplementation
     {
@@ -297,6 +308,7 @@ namespace
     // { RegistryImplementation
 
     // { BuiltinRegistry::RegistryImplementation
+#if !defined(VCPKG_INSTALLABLE) || !VCPKG_INSTALLABLE
     std::unique_ptr<RegistryEntry> BuiltinRegistry::get_port_entry(const VcpkgPaths& paths, StringView port_name) const
     {
         const auto& fs = paths.get_filesystem();
@@ -461,6 +473,7 @@ namespace
             out.push_back(filename);
         }
     }
+#endif
     // } BuiltinRegistry::RegistryImplementation
 
     // { FilesystemRegistry::RegistryImplementation
@@ -646,6 +659,7 @@ namespace
     // { RegistryEntry
 
     // { BuiltinRegistryEntry::RegistryEntry
+#if !defined(VCPKG_INSTALLABLE) || !VCPKG_INSTALLABLE
     ExpectedS<fs::path> BuiltinGitRegistryEntry::get_path_to_version(const VcpkgPaths& paths,
                                                                      const VersionT& version) const
     {
@@ -668,6 +682,7 @@ namespace
         const auto& git_tree = git_trees[it - port_versions.begin()];
         return paths.git_checkout_port(port_name, git_tree, paths.root / fs::u8path(".git"));
     }
+#endif
     // } BuiltinRegistryEntry::RegistryEntry
 
     // { FilesystemRegistryEntry::RegistryEntry
@@ -1317,11 +1332,6 @@ namespace vcpkg
         }
 
         return maybe_versions.error();
-    }
-
-    ExpectedS<std::map<std::string, VersionT, std::less<>>> get_builtin_baseline(const VcpkgPaths& paths)
-    {
-        return try_parse_builtin_baseline(paths, "default");
     }
 
     bool is_git_commit_sha(StringView sv)
